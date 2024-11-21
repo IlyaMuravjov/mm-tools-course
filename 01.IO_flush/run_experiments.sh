@@ -1,8 +1,8 @@
 #!/bin/bash
 
-CC=gcc
-$CC -o io_flush io_flush.c
+cd "$(dirname "$0")"
 
+make
 echo "Starting experiments"
 
 for add_newline in false true; do
