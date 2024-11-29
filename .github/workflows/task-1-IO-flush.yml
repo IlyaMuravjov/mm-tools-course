@@ -1,4 +1,4 @@
-name: Build and run
+name: "Task 1: IO_flush"
 
 on:
   push:
@@ -25,16 +25,6 @@ jobs:
         with:
           name: io_flush
           path: 01.IO_flush/io_flush
-
-      - name: Build overcommit
-        working-directory: 02.overcommit
-        run: make
-
-      - name: Upload overcommit
-        uses: actions/upload-artifact@v4
-        with:
-          name: overcommit
-          path: 02.overcommit/overcommit
 
   download-and-run:
     runs-on: ubuntu-latest
