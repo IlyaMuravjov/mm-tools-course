@@ -1,0 +1,57 @@
+name: Build and run
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build io_flush
+        working-directory: 01.IO_flush
+        run: make
+
+      - name: Upload io_flush
+        uses: actions/upload-artifact@v4
+        with:
+          name: io_flush
+          path: 01.IO_flush/io_flush
+
+      - name: Build overcommit
+        working-directory: 02.overcommit
+        run: make
+
+      - name: Upload overcommit
+        uses: actions/upload-artifact@v4
+        with:
+          name: overcommit
+          path: 02.overcommit/overcommit
+
+  download-and-run:
+    runs-on: ubuntu-latest
+    needs: build-and-upload
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download io_flush
+        uses: actions/download-artifact@v4
+        with:
+          name: io_flush
+          path: 01.IO_flush
+
+      - name: Set execute permissions
+        run: chmod +x 01.IO_flush/io_flush
+
+      - name: Run experiment
+        working-directory: 01.IO_flush
+        run: ./run_experiments_without_make.sh
