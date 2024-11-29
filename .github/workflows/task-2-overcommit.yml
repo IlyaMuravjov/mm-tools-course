@@ -1,0 +1,27 @@
+name: "Task 2: Overcommit"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build overcommit
+        working-directory: 02.overcommit
+        run: make
+
+      - name: Upload overcommit
+        uses: actions/upload-artifact@v4
+        with:
+          name: overcommit
+          path: 02.overcommit/overcommit
