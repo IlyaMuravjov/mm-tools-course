@@ -7,121 +7,7 @@
 #include "misc.h"
 #include "cpu.h"
 #include "memory.h"
-
-#define FUNC3_OFFS 12
-#define FUNC7_OFFS 24
-#define OPCODE_MASK 0b1111111u
-#define FUNC3_MASK  (0b111u << FUNC3_OFFS)
-#define FUNC7_MASK  (0b1111111u << FUNC7_OFFS)
-
-/**
- * @brief Opcodes to determine instruction format
- * 
- */
-enum rz_formats { // C23
-    LUI_FORMAT    = 0b0110111u,
-    AUIPC_FORMAT  = 0b0010111u,
-    J_FORMAT  = 0b1101111u,
-    JALR_FORMAT = 0b1100111u, // JALR
-    R_FORMAT  = 0b0110011u,
-    S_FORMAT  = 0b0100011u,
-    L_FORMAT =  0b0000011u, // Load, I-format
-    I_FORMAT = 0b0010011u, // ADDI..ANDI, SLLI, SRLI, SRAI
-    MEM_FORMAT = 0b0001111u, // e.g. FENCE
-    SYS_FORMAT = 0b1110011u, // e.g. ECALL, EBREAK
-};
-
-/**
- * @brief R-format CODE | F3 | F7
- * 
- */
- enum rz_r_codes {
-    ADD_CODE = R_FORMAT | ( 0b000u << FUNC3_OFFS ) | ( 0b0000000u << FUNC7_OFFS ),
-    SUB_CODE = R_FORMAT | ( 0b000u << FUNC3_OFFS ) | ( 0b0100000u << FUNC7_OFFS ),
-    XOR_CODE = R_FORMAT | ( 0b100u << FUNC3_OFFS ) | ( 0b0000000u << FUNC7_OFFS ),
- };
-
- /**
-  * @brief I-format code | F3 [ | F7 ]
-  * 
-  */
-enum rz_i_codes {
-    ADDI_CODE = I_FORMAT | ( 0b000u << FUNC3_OFFS ),
-    SLLI_CODE = I_FORMAT | ( 0b001u << FUNC3_OFFS ),
-};
-
-/**
- * @brief U-format code
- * 
- */
-enum rz_u_codes {
-    LUI_CODE = LUI_FORMAT,
-    AUIPC_CODE = AUIPC_FORMAT,
-};
-
-enum rz_sys_codes {
-    ECALL_CODE = SYS_FORMAT,
-    EBREAK_CODE = SYS_FORMAT | ( 1u << 20 ),
-};
-
-/**
- * @brief Represent RISC-V machine code for LE host-machines
- * 
- */
-typedef union {
-    rz_register_t whole;
-    struct {
-        unsigned op: 7;
-        unsigned rd: 5;
-        unsigned f3: 3;
-        unsigned rs1: 5;
-        unsigned rs2: 5;
-        unsigned f7: 7;
-    } r;
-    struct {
-        unsigned op: 7;
-        unsigned rd: 5;
-        unsigned f3: 3;
-        unsigned rs1: 5;
-        unsigned imm0_11: 12;
-    } i;
-    struct {
-        unsigned op: 7;
-        unsigned imm0_4: 5;
-        unsigned f3: 3;
-        unsigned rs1: 5;
-        unsigned rs2: 5;
-        unsigned imm5_11: 7;
-    } s;
-    struct {
-        unsigned op: 7;
-        unsigned imm11: 1;
-        unsigned imm1_4: 4;
-        unsigned f3: 3;
-        unsigned rs1: 5;
-        unsigned rs2: 5;
-        unsigned imm5_10: 6;
-        unsigned imm12: 1;
-    } b;
-    struct {
-        unsigned op: 7;
-        unsigned rd: 5;
-        unsigned imm12_31: 20;
-    } u;
-    struct {
-        unsigned op: 7;
-        unsigned rd: 5;
-        unsigned imm12_19: 8;
-        unsigned imm11: 1;
-        unsigned imm1_10: 10;
-        unsigned imm20: 1;
-    } j;
-} rz_instruction_t;
-
-struct rz_cpu_s {
-    const char *info;
-    rz_register_t r_pc, r_x[32];
-};
+#include "cpu_internal.h"
 
 const char *rz_cpu_info(const rz_cpu_p pcpu)
 {
@@ -170,7 +56,7 @@ static inline rz_register_t sign_extend(unsigned some_bits, int how_many_bits) {
 }
 
 bool rz_i_cycle(rz_cpu_p pcpu, rz_instruction_t instr) {
-    switch(instr.whole & (OPCODE_MASK | FUNC3_MASK)) {
+        switch(instr.whole & (OPCODE_MASK | FUNC3_MASK)) {
         case ADDI_CODE:
             pcpu->r_x[instr.i.rd] = pcpu->r_x[instr.i.rs1] + sign_extend(instr.i.imm0_11, 12);
         break;
@@ -184,14 +70,100 @@ bool rz_i_cycle(rz_cpu_p pcpu, rz_instruction_t instr) {
     return true;
 }
 
+static bool rz_ecall(rz_cpu_p pcpu) {
+    rz_register_t ecall_id = pcpu->r_x[10];
+
+    switch (ecall_id) {
+        case PRINT_INT:
+            printf("%u\n", pcpu->r_x[11]);
+            return true;
+        case READ_INT: {
+            int input;
+            printf("Enter integer:\n");
+            if (scanf("%d", &input) != 1) {
+                fprintf(stderr, "Error reading integer\n");
+                return false;
+            }
+            pcpu->r_x[11] = input;
+            return true;
+        }
+        default:
+            fprintf(stderr, "Unsupported ecall ID %u\n", ecall_id);
+            return false;
+    }
+}
+
 bool rz_sys_cycle(rz_cpu_p pcpu, rz_instruction_t instr) {
     switch(instr.whole & (1u << 20)){
         case 0:
-            return true; // return rz_ecall();
+            return rz_ecall(pcpu);
         case 1:
         default:
             return false;
     }
+}
+
+static bool rz_b_cycle(rz_cpu_p pcpu, rz_instruction_t instr) {
+    int32_t imm = ( (instr.b.imm12 << 12)
+                   | (instr.b.imm11 << 11)
+                   | (instr.b.imm5_10 << 5)
+                   | (instr.b.imm1_4 << 1));
+    imm = sign_extend(imm, 13);
+
+    rz_register_t rs1_val = pcpu->r_x[instr.b.rs1];
+    rz_register_t rs2_val = pcpu->r_x[instr.b.rs2];
+
+    bool take = false;
+    switch (instr.b.f3) {
+        case BEQ:
+            take = (rs1_val == rs2_val);
+        break;
+        case BNE:
+            take = (rs1_val != rs2_val);
+        break;
+        case BLT:
+            take = ((int32_t)rs1_val < (int32_t)rs2_val);
+        break;
+        case BGE:
+            take = ((int32_t)rs1_val >= (int32_t)rs2_val);
+        break;
+        case BLTU:
+            take = (rs1_val < rs2_val);
+        break;
+        case BGEU:
+            take = (rs1_val >= rs2_val);
+        break;
+        default:
+            return false;
+    }
+
+    if (take) {
+        pcpu->r_pc += (imm - 4);
+    }
+
+    return true;
+}
+
+static bool rz_j_cycle(rz_cpu_p pcpu, rz_instruction_t instr) {
+    int32_t imm = ((instr.j.imm20 << 20)
+                   | (instr.j.imm12_19 << 12)
+                   | (instr.j.imm11 << 11)
+                   | (instr.j.imm1_10 << 1));
+    imm = sign_extend(imm, 21);
+
+    pcpu->r_x[instr.j.rd] = pcpu->r_pc + 4;
+    pcpu->r_pc += (imm - 4);
+    return true;
+}
+
+static bool rz_jalr_cycle(rz_cpu_p pcpu, rz_instruction_t instr) {
+    int32_t imm = sign_extend(instr.i.imm0_11, 12);
+    rz_register_t base = pcpu->r_x[instr.i.rs1];
+    rz_register_t target = (base + imm) & ~1U;
+
+    pcpu->r_x[instr.i.rd] = pcpu->r_pc + 4;
+    pcpu->r_pc = target - 4;
+    return true;
 }
 
 bool rz_cycle(rz_cpu_p pcpu) {
@@ -216,16 +188,19 @@ bool rz_cycle(rz_cpu_p pcpu) {
         case AUIPC_FORMAT:
             pcpu->r_x[instr.u.rd] = (instr.u.imm12_31 << 12) + pcpu->r_pc;
         break;
-
         case J_FORMAT:
+            goon = rz_j_cycle(pcpu, instr);
         break;
         case JALR_FORMAT:
+            goon = rz_jalr_cycle(pcpu, instr);
         break;
-
         case MEM_FORMAT:
         break;
         case SYS_FORMAT:
             goon = rz_sys_cycle(pcpu, instr);
+        break;
+        case B_FORMAT:
+            goon = rz_b_cycle(pcpu, instr);
         break;
         default:
             fprintf(stderr, "Invalid instruction %08X format, opcode %08X\n", instr.whole, instr.whole & OPCODE_MASK);
