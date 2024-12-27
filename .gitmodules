@@ -1,0 +1,3 @@
+[submodule "03.RISC-Z/utest"]
+	path = 03.RISC-Z/utest
+	url = https://github.com/sheredom/utest.h.git

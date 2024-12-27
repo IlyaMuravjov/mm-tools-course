@@ -1,0 +1,56 @@
+name: "Task 3: RISC-Z"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install RISC-V binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils-riscv64-unknown-elf
+
+      - name: Setup build configs
+        working-directory: 03.RISC-Z
+        run: ./_setup_build_configs.sh
+
+      - name: Build RISC-Z
+        working-directory: 03.RISC-Z/build/release
+        run: cmake --build .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: risc-z-build-release
+          path: 03.RISC-Z/build/release
+
+  download-and-test:
+    runs-on: ubuntu-latest
+    needs: build-and-upload
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: risc-z-build-release
+          path: 03.RISC-Z/build/release
+
+      - name: Set executable permissions
+        working-directory: 03.RISC-Z/build/release
+        run: chmod +x risc-z test_main test_cpu
+
+      - name: Run tests
+        working-directory: 03.RISC-Z/build/release
+        run: ctest -V
